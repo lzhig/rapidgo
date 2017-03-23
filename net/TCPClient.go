@@ -8,22 +8,22 @@ import (
 
 // TCPClient type
 type TCPClient struct {
-	conn Connection
+	conn Connection // 与服务端的连接
 
-	callback Callback
+	callback ICallback // 回调接口
 
-	readBuffer []byte
+	readBuffer []byte // 读取数据缓存
 
-	packetsChan chan *packetChan
+	packetsChan chan *packetChan // 从连接loop的协程传递上主线程
 }
 
 // Connect function
-func (c *TCPClient) Connect(serverAddress string, timeout uint32, callback Callback) (err error) {
+func (c *TCPClient) Connect(serverAddress string, timeout uint32, callback ICallback) (err error) {
 	if callback == nil {
 		return errors.New("Must be set callback")
 	}
-	c.callback = callback
 
+	c.callback = callback
 	c.conn.remoteAddress = serverAddress
 
 	dailer := net.Dialer{

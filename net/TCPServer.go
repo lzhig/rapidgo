@@ -16,13 +16,13 @@ type TCPServer struct {
 	maxClientsCount uint32
 	conns           connections
 
-	callback Callback
+	callback ICallback
 
 	packetsChan chan *packetChan
 }
 
 // Start function
-func (s *TCPServer) Start(address string, maxClientsAllowed uint32, callback Callback) (err error) {
+func (s *TCPServer) Start(address string, maxClientsAllowed uint32, callback ICallback) (err error) {
 	if callback == nil {
 		return errors.New("Must be set callback")
 	}
@@ -82,7 +82,30 @@ func (s *TCPServer) loop() {
 
 			s.callback.Connected(newConn)
 
-			go newConn.loop(s.callback, s.packetsChan)
+			go newConn.loop(s, s.packetsChan)
 		}
+	}
+}
+
+// Disconnected function
+func (s *TCPServer) Disconnected(conn *Connection, err error) {
+	s.callback.Disconnected(conn, err)
+	s.conns.remove(conn)
+}
+
+// Connected function
+func (s *TCPServer) Connected(conn *Connection) {
+	s.callback.Connected(conn)
+}
+
+// Received function
+func (s *TCPServer) Received(conn *Connection, packet *Packet) {
+	s.callback.Received(conn, packet)
+}
+
+// Update function
+func (s *TCPServer) Update() {
+	for p := range s.packetsChan {
+		s.callback.Received(p.conn, p.packet)
 	}
 }
