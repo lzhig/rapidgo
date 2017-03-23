@@ -1,6 +1,7 @@
 package net
 
 import (
+	"errors"
 	"io"
 	"net"
 	"sync"
@@ -11,6 +12,53 @@ type ICallback interface {
 	Disconnected(conn *Connection, err error)
 	Connected(conn *Connection)
 	Received(conn *Connection, packet *Packet)
+}
+
+// AtLeastReader interface
+type AtLeastReader interface {
+	ReadBuffer(buf []byte) bool
+}
+
+// CreatePacketFunc type
+type CreatePacketFunc func(reader AtLeastReader) (*Packet, error)
+
+var createPacketFunc CreatePacketFunc
+var defaultHeader []byte
+
+const (
+	defaultHeaderLen = 4
+)
+
+func init() {
+	createPacketFunc = defaultCreatePacket
+	defaultHeader = make([]byte, defaultHeaderLen)
+}
+
+// SetCreatePacketFunc function
+func SetCreatePacketFunc(f CreatePacketFunc) {
+	createPacketFunc = f
+}
+
+func defaultCreatePacket(reader AtLeastReader) (*Packet, error) {
+	ret := reader.ReadBuffer(defaultHeader)
+	if !ret {
+		return nil, nil
+	}
+
+	if defaultHeader[0] == 0xFE && defaultHeader[1] == 0xDC {
+		len := (uint32(defaultHeader[2]) << 8) + uint32(defaultHeader[3])
+		p := &Packet{}
+		p.init(len)
+		return p, nil
+	}
+
+	return nil, errors.New("Invalid header")
+}
+
+// 用于向上层传递收到的数据包
+type packetChan struct {
+	packet *Packet
+	conn   *Connection
 }
 
 // Connection object
@@ -24,12 +72,6 @@ type Connection struct {
 	buffer singleReadWriteBuffer // 读取缓存
 }
 
-// 用于向上层传递收到的数据包
-type packetChan struct {
-	packet *Packet
-	conn   *Connection
-}
-
 // RemoteAddr function
 func (c *Connection) RemoteAddr() net.Addr {
 	return c.conn.RemoteAddr()
@@ -40,26 +82,6 @@ func (c *Connection) disconnect() {
 	<-c.exitLoopChan
 }
 
-type AtLeastReader interface {
-	ReadAtLeast(r io.Reader, buf []byte, min int) (n int, err error)
-}
-
-type CreatePacketFunc func(reader AtLeastReader) *Packet
-
-func defaultCreatePacket(reader AtLeastReader) *Packet {
-	return nil
-}
-
-func SetCreatePacketFunc(f CreatePacketFunc) {
-	createPacketFunc = f
-}
-
-var createPacketFunc CreatePacketFunc
-
-func init() {
-	createPacketFunc = defaultCreatePacket
-}
-
 func (c *Connection) loop(callback ICallback, packetsChan chan *packetChan) {
 	defer c.conn.Close()
 
@@ -68,6 +90,18 @@ func (c *Connection) loop(callback ICallback, packetsChan chan *packetChan) {
 
 	var packet *Packet
 
+	fillFunction := func(p **Packet) {
+		io.Copy(*p, &c.buffer)
+
+		if !(*p).canWrite() {
+			packetsChan <- &packetChan{
+				packet: *p,
+				conn:   c,
+			}
+			*p = nil
+		}
+	}
+
 	for {
 		select {
 		case <-c.stopCmdChan:
@@ -75,25 +109,26 @@ func (c *Connection) loop(callback ICallback, packetsChan chan *packetChan) {
 			return
 		default:
 			// read buffer
-			b := c.buffer.getWriteBuffer()
-			if len(b) <= 0 {
-				panic("the len of writebuffer should not be zero.")
-			}
-
-			n, err := c.conn.Read(b)
+			written, err := io.Copy(&c.buffer, c.conn)
 			if err != nil {
 				callback.Disconnected(c, err)
 				return
 			}
 
-			if n <= 0 {
+			if written <= 0 {
 				continue
 			}
-			c.buffer.moveWritePos(uint32(n))
 
 			if packet == nil {
 				// 创建packet
-				packet = createPacketFunc(c.buffer)
+				packet, err = createPacketFunc(&c.buffer)
+				if err != nil {
+					callback.Disconnected(c, err)
+				}
+
+				fillFunction(&packet)
+			} else {
+				fillFunction(&packet)
 			}
 		}
 	}
@@ -109,44 +144,98 @@ type singleReadWriteBuffer struct {
 
 func (buf *singleReadWriteBuffer) init(len uint32) {
 	buf.len = len
-	buf.buffer = make([]byte, len)
+	buf.buffer = make([]byte, buf.len)
 }
 
-func (buf *singleReadWriteBuffer) getWriteBuffer() []byte {
-	if buf.writePos >= buf.readPos {
-		return buf.buffer[buf.writePos:]
+func (buf *singleReadWriteBuffer) Write(p []byte) (n int, err error) {
+	len := uint32(len(p))
+	// 没有空余的空间
+	if (buf.readPos == 0 && buf.writePos == buf.len-1) || (buf.writePos+1 == buf.readPos) {
+		return 0, io.EOF
 	}
-	return buf.buffer[buf.writePos : buf.readPos-1]
-}
 
-func (buf *singleReadWriteBuffer) moveWritePos(pos uint32) {
-	p := buf.writePos + pos
+	num := uint32(0)
 
 	if buf.writePos >= buf.readPos {
-		// 当写位置大于读位置时，如果移动的位置不超过总长度
-		if p < buf.len {
-			buf.writePos = p
-			return
+		// 如果写位置在读位置右边，先填充从写位置到最右边的空间，如果读位置在0位置处，只能填充到倒数第二个位置
+		tailPos := uint32(0)
+		readPosIsZero := false
+		if buf.readPos == 0 {
+			tailPos = buf.len - 1
+			readPosIsZero = true
+		} else {
+			tailPos = buf.len
 		}
 
-		// 否则这个位置又移动头部，但不是超过读位置
-		p = p - buf.len
-		if p > buf.readPos {
-			panic("pos too large.")
+		num = uint32(copy(buf.buffer[buf.writePos:tailPos], p))
+		buf.writePos += num
+
+		if num == len || readPosIsZero {
+			return int(num), nil
 		}
-		buf.writePos = p
-		return
+
+		// 如果还没有完成, 第二次填充最多只能到读位置前一个位置
+		buf.writePos = 0
 	}
 
-	// 当写位置小于读位置时，移动位置不能超过读位置
-	if p >= buf.readPos {
-		panic("pos too large.")
-	}
-	buf.writePos = p
+	tailPos := buf.readPos - 1
+	num2 := uint32(copy(buf.buffer[buf.writePos:tailPos], p[num:]))
+	buf.writePos += num2
+	return int(num + num2), nil
 }
 
-func (buf *singleReadWriteBuffer) ReadAtLeast(r io.Reader, min int) (n int, err error) {
-	readLen = len(p)
+func (buf *singleReadWriteBuffer) Read(p []byte) (n int, err error) {
+	if buf.readPos == buf.writePos {
+		return 0, nil
+	}
+
+	if buf.readPos < buf.writePos {
+		num := copy(p, buf.buffer[buf.readPos:buf.writePos])
+		buf.readPos += uint32(num)
+		return num, nil
+	}
+
+	num := copy(p, buf.buffer[buf.readPos:])
+	buf.readPos += uint32(num)
+
+	if buf.readPos < buf.len {
+		return num, nil
+	}
+
+	buf.readPos = 0
+
+	if buf.writePos == 0 {
+		return num, nil
+	}
+
+	num2 := copy(p[num:], buf.buffer[:buf.writePos+1])
+	buf.readPos += uint32(num2)
+
+	return num + num2, nil
+}
+
+func (buf *singleReadWriteBuffer) ReadBuffer(p []byte) bool {
+	readLen := uint32(len(p))
+
+	if buf.readPos < buf.writePos {
+		if buf.readPos+readLen > buf.writePos {
+			return false
+		}
+
+		copy(p, buf.buffer[buf.readPos:buf.readPos+readLen])
+		buf.readPos += readLen
+
+		return true
+	}
+
+	if buf.readPos+readLen-buf.len <= buf.writePos {
+		copy(p, buf.buffer[buf.readPos:buf.len])
+		copy(p[buf.len-buf.readPos:], buf.buffer[:buf.readPos+readLen-buf.len])
+		buf.readPos = buf.readPos + readLen - buf.len
+		return true
+	}
+
+	return false
 }
 
 // 管理建立的连接
