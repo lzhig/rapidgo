@@ -55,3 +55,15 @@ func (c *TCPClient) Update() {
 		c.callback.Received(p.conn, p.packet)
 	}
 }
+
+// Send function
+func (c *TCPClient) Send(data []byte) error {
+	size, err := c.conn.conn.Write(data)
+	if err != nil {
+		return err
+	}
+	if size != len(data) {
+		return errors.New("Failed to send data")
+	}
+	return nil
+}

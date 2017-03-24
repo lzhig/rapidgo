@@ -99,7 +99,7 @@ func (s *TCPServer) Connected(conn *Connection) {
 }
 
 // Received function
-func (s *TCPServer) Received(conn *Connection, packet *Packet) {
+func (s *TCPServer) Received(conn *Connection, packet Packet) {
 	s.callback.Received(conn, packet)
 }
 

@@ -16,19 +16,21 @@ func (callback demoCallback) Connected(conn *net.Connection) {
 	fmt.Println("connected")
 }
 
-func (callback demoCallback) Received(conn *net.Connection, packet *net.Packet) {
-	fmt.Println(conn.RemoteAddr().String())
-	fmt.Println("data received.")
+func (callback demoCallback) Received(conn *net.Connection, packet net.Packet) {
+	//fmt.Println(conn.RemoteAddr().String())
+	//fmt.Println("data received.")
 }
 
 func main() {
 	server := net.CreateTCPServer()
 	var demo demoCallback
 	fmt.Println("start server...")
-	err := server.Start("0.0.0.0:8888", 1, demo)
+	err := server.Start("127.0.0.1:8888", 1, demo)
 	fmt.Println("result: ", err)
 
 	if err == nil {
-		select {}
+		for {
+			server.Update()
+		}
 	}
 }
