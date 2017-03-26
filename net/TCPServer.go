@@ -66,15 +66,15 @@ func (s *TCPServer) loop() {
 			return
 		default:
 			//s.netListener.SetDeadline(time.Now().Add(time.Millisecond))
+			s.conns.acquire()
+
 			conn, err := s.netListener.AcceptTCP()
 			if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
+				s.conns.release()
 				continue
 			} else if err != nil {
+				s.conns.release()
 				return
-			}
-			if s.conns.size() >= s.maxClientsCount {
-				conn.Close()
-				continue
 			}
 
 			newConn := &Connection{conn: conn}
@@ -108,4 +108,16 @@ func (s *TCPServer) Update() {
 	for p := range s.packetsChan {
 		s.callback.Received(p.conn, p.packet)
 	}
+}
+
+// Send function
+func (s *TCPServer) Send(conn *Connection, data []byte) error {
+	size, err := conn.conn.Write(data)
+	if err != nil {
+		return err
+	}
+	if size != len(data) {
+		return errors.New("Failed to send data")
+	}
+	return nil
 }

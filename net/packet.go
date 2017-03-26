@@ -6,6 +6,8 @@ import "errors"
 // Packet interface
 type Packet interface {
 	FillFrom(r io.Reader) (ok bool, err error)
+	Read(data []byte) (uint32, error)
+	GetBuffer() []byte
 }
 
 // PacketFactory interface
@@ -89,4 +91,13 @@ func (p *defaultPacket) FillFrom(r io.Reader) (ok bool, err error) {
 	}
 
 	return false, nil
+}
+
+func (p *defaultPacket) Read(data []byte) (uint32, error) {
+	n := copy(data, p.buffer[p.readPos:])
+	return uint32(n), nil
+}
+
+func (p *defaultPacket) GetBuffer() []byte {
+	return p.buffer
 }
