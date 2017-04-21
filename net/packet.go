@@ -2,6 +2,7 @@ package net
 
 import "io"
 import "errors"
+import "goim/libs/bytes"
 
 // Packet interface
 type Packet interface {
@@ -36,6 +37,19 @@ func (f *defaultPacketFactory) CreatePacket() Packet {
 const (
 	defaultHeaderSize = 4
 )
+
+type dPacket struct{
+	bytes.Buffer
+}
+
+func (p* dPacket) setHeaderFactory(){
+	
+}
+
+func (p* dPacket) Write(buf []byte) (n int, err error)
+{
+
+}
 
 type defaultPacket struct {
 	header [defaultHeaderSize]byte // 头部数据
