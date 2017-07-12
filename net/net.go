@@ -1,11 +1,11 @@
 package net
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"sync"
-	"time"
 )
 
 // ICallback interface
@@ -45,17 +45,6 @@ func (c *Connection) loop(callback ICallback, packetsChan chan *packetChan) {
 
 	var packet Packet
 
-	i := 0
-	s := time.Now()
-
-	defer func() {
-		d := time.Now().Sub(s)
-		sec := d.Seconds()
-
-		fmt.Println(float64(i) / sec * 0.0625)
-
-	}()
-
 	for {
 		select {
 		case <-c.stopCmdChan:
@@ -63,28 +52,80 @@ func (c *Connection) loop(callback ICallback, packetsChan chan *packetChan) {
 			return
 		default:
 			if packet == nil {
-				packet = packetFactory.CreatePacket()
+				packet = DefaultCreatePacketFunc()
 			}
 
-			ok, err := packet.FillFrom(c.conn)
-			if err != nil && err != io.EOF {
-				fmt.Println("FillFrom err:", err)
-				callback.Disconnected(c, err)
-				return
+			// if err := c.conn.SetReadDeadline(time.Now().Add(time.Second * 60)); err != nil {
+			// 	fmt.Println("SetReadDeadline:", err)
+			// 	return
+			// }
+
+			{
+				ok, err := packet.ReadHeader(c.conn)
+				if err != nil {
+					if e, ok := err.(net.Error); !ok || e.Timeout() || !e.Temporary() && err != io.EOF {
+						//fmt.Println("FillFrom err:", err)
+						callback.Disconnected(c, err)
+						return
+					}
+					fmt.Println("Error:", err)
+				}
+				if !ok {
+					// if err := c.conn.SetReadDeadline(time.Time{}); err != nil {
+					// 	fmt.Println("SetReadDeadline:", err)
+					// 	return
+					// }
+					continue
+				}
 			}
+
+			// if err := c.conn.SetReadDeadline(time.Now().Add(time.Second * 60)); err != nil {
+			// 	fmt.Println("SetReadDeadline:", err)
+			// 	return
+			// }
+
+			ok, err := packet.FillFrom(c.conn)
+			if err != nil {
+				if e, ok := err.(net.Error); !ok || e.Timeout() || !e.Temporary() && err != io.EOF {
+					//fmt.Println("FillFrom err:", err)
+					callback.Disconnected(c, err)
+					return
+				}
+				fmt.Println("Error:", err)
+			}
+			// if err := c.conn.SetReadDeadline(time.Time{}); err != nil {
+			// 	fmt.Println("SetReadDeadline:", err)
+			// 	return
+			// }
 
 			if ok {
 				packetsChan <- &packetChan{
 					packet: packet,
 					conn:   c,
 				}
-				i++
-				//fmt.Println(i)
+
 				packet = nil
 			}
 
 		}
 	}
+}
+
+// SendPacket send a packet
+func (c *Connection) SendPacket(p Packet) error {
+	return p.Send(c)
+}
+
+// Send send data
+func (c *Connection) Send(data []byte) error {
+	size, err := c.conn.Write(data)
+	if err != nil {
+		return err
+	}
+	if size != len(data) {
+		return errors.New("Failed to send data")
+	}
+	return err
 }
 
 // 管理建立的连接

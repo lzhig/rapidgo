@@ -1,11 +1,12 @@
 package websocket
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"net/http"
-	ws "rapidgo/net/websocket/websocket"
 	"sync"
+	ws "thirdparty/websocket/websocket"
 )
 
 type ICallback interface {
@@ -13,6 +14,14 @@ type ICallback interface {
 	Connected(conn *Connection)
 	Received(conn *Connection, data []byte)
 }
+
+type eventType int
+
+const (
+	eventTypeConnect    eventType = 1
+	eventTypeDisconnect eventType = 2
+	eventTypeData       eventType = 3
+)
 
 var upgrader = ws.Upgrader{
 	ReadBufferSize:  1024,
@@ -36,17 +45,19 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	Connection.stopCmdChan = make(chan bool, 1)
 	Connection.exitLoopChan = make(chan bool, 1)
 
-	h.callback.Connected(Connection)
+	h.server.packetChan <- &packet{conn: Connection, callback: h.callback, eventType: eventTypeConnect}
 
-	go Connection.writeloop()
+	//go Connection.writeloop()
 
 	Connection.readloop(h.server.packetChan, h.callback)
 }
 
 type packet struct {
-	conn     *Connection
-	callback ICallback
-	data     []byte
+	eventType eventType
+	conn      *Connection
+	callback  ICallback
+	data      []byte
+	err       error
 }
 
 // Server class
@@ -92,10 +103,23 @@ func (s *Server) Register(pattern string, callback ICallback) {
 }
 
 func (s *Server) Update() {
-	select {
-	case p := <-s.packetChan:
-		p.callback.Received(p.conn, p.data)
-	default:
+	for {
+		select {
+		case p := <-s.packetChan:
+			switch p.eventType {
+			case eventTypeConnect:
+				p.callback.Connected(p.conn)
+			case eventTypeDisconnect:
+				p.callback.Disconnected(p.conn, p.err)
+			case eventTypeData:
+				p.callback.Received(p.conn, p.data)
+			default:
+				panic("Invalid type.")
+			}
+
+		default:
+			return
+		}
 	}
 }
 
@@ -112,8 +136,11 @@ func (c *Connection) RemoteAddr() net.Addr {
 }
 
 func (c *Connection) Close() {
-	c.stopCmdChan <- true
-	<-c.exitLoopChan
+	//fmt.Println("Close 1")
+	//c.stopCmdChan <- true
+	//fmt.Println("Close 2")
+	//<-c.exitLoopChan
+	//fmt.Println("Close 3")
 	c.conn.Close()
 }
 
@@ -129,7 +156,9 @@ func (c *Connection) readloop(packetChan chan *packet, callback ICallback) {
 	for {
 		select {
 		case <-c.stopCmdChan:
+			fmt.Println("readloop 1")
 			c.exitLoopChan <- true
+			fmt.Println("readloop 2")
 			return
 		default:
 			_, message, err := c.conn.ReadMessage()
@@ -138,11 +167,10 @@ func (c *Connection) readloop(packetChan chan *packet, callback ICallback) {
 				//	log.Printf("error: %v", err)
 				//}
 				//break
-				callback.Disconnected(c, err)
+				packetChan <- &packet{conn: c, err: err, callback: callback, eventType: eventTypeDisconnect}
 				return
 			}
-			packetChan <- &packet{conn: c, callback: callback, data: message}
-			//fmt.Println("new message")
+			packetChan <- &packet{conn: c, callback: callback, data: message, eventType: eventTypeData}
 		}
 	}
 }

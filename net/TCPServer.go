@@ -8,8 +8,6 @@ import (
 
 // TCPServer struct
 type TCPServer struct {
-	netListener *net.TCPListener
-
 	stopCmdChan  chan bool
 	exitLoopChan chan bool
 
@@ -31,7 +29,7 @@ func (s *TCPServer) Start(address string, maxClientsAllowed uint32, callback ICa
 		return err
 	}
 
-	s.netListener, err = net.ListenTCP("tcp", tcpAddr)
+	netListener, err := net.ListenTCP("tcp", tcpAddr)
 	if err != nil {
 		return err
 	}
@@ -44,7 +42,7 @@ func (s *TCPServer) Start(address string, maxClientsAllowed uint32, callback ICa
 	s.maxClientsCount = maxClientsAllowed
 	s.conns.init(maxClientsAllowed)
 
-	go s.loop()
+	go s.loop(netListener)
 
 	return nil
 }
@@ -53,11 +51,10 @@ func (s *TCPServer) Start(address string, maxClientsAllowed uint32, callback ICa
 func (s *TCPServer) Stop() {
 	s.stopCmdChan <- true
 	<-s.exitLoopChan
-	s.netListener = nil
 }
 
-func (s *TCPServer) loop() {
-	defer s.netListener.Close()
+func (s *TCPServer) loop(netListener *net.TCPListener) {
+	defer netListener.Close()
 
 	for {
 		select {
@@ -65,10 +62,10 @@ func (s *TCPServer) loop() {
 			s.exitLoopChan <- true
 			return
 		default:
-			//s.netListener.SetDeadline(time.Now().Add(time.Millisecond))
+			//netListener.SetDeadline(time.Now().Add(time.Millisecond))
 			s.conns.acquire()
 
-			conn, err := s.netListener.AcceptTCP()
+			conn, err := netListener.AcceptTCP()
 			if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
 				s.conns.release()
 				continue
@@ -112,12 +109,9 @@ func (s *TCPServer) Update() {
 
 // Send function
 func (s *TCPServer) Send(conn *Connection, data []byte) error {
-	size, err := conn.conn.Write(data)
-	if err != nil {
-		return err
-	}
-	if size != len(data) {
-		return errors.New("Failed to send data")
-	}
-	return nil
+	return conn.Send(data)
+}
+
+func (s *TCPServer) SendPacket(conn *Connection, p Packet) error {
+	return conn.SendPacket(p)
 }

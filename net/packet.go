@@ -2,35 +2,19 @@ package net
 
 import "io"
 import "errors"
-import "goim/libs/bytes"
 
 // Packet interface
 type Packet interface {
+	Create(size uint)
+	ReadHeader(r io.Reader) (ok bool, err error)
 	FillFrom(r io.Reader) (ok bool, err error)
 	Read(data []byte) (uint32, error)
 	GetBuffer() []byte
+	Send(c *Connection) error
 }
 
-// PacketFactory interface
-type PacketFactory interface {
-	CreatePacket() Packet
-}
-
-var packetFactory PacketFactory
-
-func init() {
-	packetFactory = &defaultPacketFactory{}
-}
-
-// SetPacketFactory function
-func SetPacketFactory(f PacketFactory) {
-	packetFactory = f
-}
-
-type defaultPacketFactory struct {
-}
-
-func (f *defaultPacketFactory) CreatePacket() Packet {
+// DefaultCreatePacketFunc is default function to create packet
+var DefaultCreatePacketFunc = func() Packet {
 	return &defaultPacket{}
 }
 
@@ -38,43 +22,30 @@ const (
 	defaultHeaderSize = 4
 )
 
-type dPacket struct{
-	bytes.Buffer
-}
-
-func (p* dPacket) setHeaderFactory(){
-	
-}
-
-func (p* dPacket) Write(buf []byte) (n int, err error)
-{
-
-}
-
 type defaultPacket struct {
 	header [defaultHeaderSize]byte // 头部数据
 
 	buffer []byte // 缓冲区
 
-	readPos  uint32 // 读位置
-	writePos uint32 // 写位置
-	len      uint32 // 缓冲区大小
+	readPos  uint // 读位置
+	writePos uint // 写位置
+	len      uint // 缓冲区大小
 
 	filledHeaderSize uint8 // 已经填充了多少头部数据
 }
 
-func (p *defaultPacket) init(len uint32) {
+func (p *defaultPacket) init(len uint) {
 	p.buffer = make([]byte, len)
 	p.len = len
 }
 
 func (p *defaultPacket) Write(buf []byte) (n int, err error) {
 	num := copy(p.buffer[p.writePos:], buf)
-	p.writePos += uint32(num)
+	p.writePos += uint(num)
 	return num, nil
 }
 
-func (p *defaultPacket) FillFrom(r io.Reader) (ok bool, err error) {
+func (p *defaultPacket) ReadHeader(r io.Reader) (ok bool, err error) {
 	if p.filledHeaderSize < defaultHeaderSize {
 		n, err := r.Read(p.header[p.filledHeaderSize:])
 		p.filledHeaderSize += uint8(n)
@@ -90,12 +61,15 @@ func (p *defaultPacket) FillFrom(r io.Reader) (ok bool, err error) {
 			return false, errors.New("invalid connection")
 		}
 
-		p.len = (uint32(p.header[2]) << 8) + uint32(p.header[3])
+		p.len = (uint(p.header[2]) << 8) + uint(p.header[3])
 		p.buffer = make([]byte, p.len)
 	}
+	return true, nil
+}
 
+func (p *defaultPacket) FillFrom(r io.Reader) (ok bool, err error) {
 	n, err := r.Read(p.buffer[p.writePos:])
-	p.writePos += uint32(n)
+	p.writePos += uint(n)
 	if err != nil {
 		return false, err
 	}
@@ -114,4 +88,22 @@ func (p *defaultPacket) Read(data []byte) (uint32, error) {
 
 func (p *defaultPacket) GetBuffer() []byte {
 	return p.buffer
+}
+
+func (p *defaultPacket) Send(c *Connection) error {
+	if err := c.Send(p.header[:]); err != nil {
+		return err
+	}
+	if err := c.Send(p.buffer); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *defaultPacket) Create(size uint) {
+	p.header[0] = 0xFE
+	p.header[1] = 0xDC
+	p.header[2] = byte((size & 0xFF00) >> 8)
+	p.header[3] = byte(size & 0xFF)
+	p.init(size)
 }
