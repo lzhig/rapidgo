@@ -29,7 +29,7 @@ func (c *TCPClient) Connect(serverAddress string, timeout uint32, callback ICall
 	dailer := net.Dialer{
 		Timeout:   time.Millisecond * time.Duration(timeout),
 		Deadline:  time.Time{},
-		KeepAlive: time.Millisecond * time.Duration(30),
+		KeepAlive: time.Second * time.Duration(30),
 	}
 	c.conn.conn, err = dailer.Dial("tcp", serverAddress)
 	if err != nil {
@@ -66,4 +66,9 @@ func (c *TCPClient) Send(data []byte) error {
 		return errors.New("Failed to send data")
 	}
 	return nil
+}
+
+// SendPacket function
+func (c *TCPClient) SendPacket(p Packet) error {
+	return c.conn.SendPacket(p)
 }
