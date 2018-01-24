@@ -3,7 +3,6 @@ package base
 import (
 	"container/list"
 	"fmt"
-	"time"
 )
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -39,7 +38,7 @@ func (e StateError) Error() string {
 type StateID int
 
 // StateInvalidID 非法的状态ID，用于状态机初始值
-const StateInvalidID StateID = StateID(-1)
+const StateInvalidID StateID = StateID(0)
 
 ///////////////////////////////////////////////////////////////////////////////
 type commandID uint
@@ -59,18 +58,18 @@ type command struct {
 ///////////////////////////////////////////////////////////////////////////////
 // StateListener 状态监听
 type StateListener interface {
-	StateChange(newStateID StateID, oldStateID StateID)
+	stateChange(newStateID StateID, oldStateID StateID)
 }
 
 // StateInterface 状态接口
 type StateInterface interface {
-	Init(StateID, ...interface{})
 	GetStateID() StateID           // 返回当前状态ID
 	OnEnter(prevStateID StateID)   // 从前一个状态切换到此状态
 	OnExit(nextStateID StateID)    // 从此状态切换到下一状态
 	OnSuspend(nextStateID StateID) // 临时挂起此状态
 	OnResume(prevStateID StateID)  // 恢复此状态
-	Update(time.Duration)          // 更新函数
+	Update()                       // 更新函数
+	OnMessage(data []byte)         // 处理收到的消息
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -111,8 +110,7 @@ func (sm *StateManager) RemoveListener(listener StateListener) {
 }
 
 // RegisterState 注册状态
-func (sm *StateManager) RegisterState(state StateInterface) *StateError {
-	stateID := state.GetStateID()
+func (sm *StateManager) RegisterState(stateID StateID, state StateInterface) *StateError {
 	if stateID == StateInvalidID {
 		return &StateError{ErrorInvalidStateID, "Invalid State ID"}
 	}
@@ -135,6 +133,13 @@ func (sm *StateManager) GetCurrentState() StateInterface {
 	return state
 }
 
+func (sm *StateManager) SendMessage(data []byte) {
+	state := sm.GetCurrentState()
+	if state != nil {
+		state.OnMessage(data)
+	}
+}
+
 // ChangeState 改变状态
 func (sm *StateManager) ChangeState(stateID StateID, flushCommandQueue bool) {
 	if flushCommandQueue {
@@ -155,11 +160,6 @@ func (sm *StateManager) PushState(stateID StateID, flushCommandQueue bool) {
 		sm.commandQueue.Init()
 	}
 	sm.commandQueue.PushFront(&command{commandType: commandPUSH, stateID: stateID})
-}
-
-func (sm *StateManager) PushStateImmediate(stateID StateID, flushCommandQueue bool) {
-	sm.PushState(stateID, flushCommandQueue)
-	sm.updateCommandQueue()
 }
 
 func (sm *StateManager) updateCommandQueue() {
@@ -233,11 +233,11 @@ func (sm *StateManager) updateCommandQueue() {
 }
 
 // Update 更新状态
-func (sm *StateManager) Update(t time.Duration) {
+func (sm *StateManager) Update() {
 	sm.updateCommandQueue()
 
 	currentState := sm.GetCurrentState()
 	if currentState != nil {
-		currentState.Update(t)
+		currentState.Update()
 	}
 }

@@ -4,74 +4,50 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"rapidgo/net"
 	"runtime"
-	"time"
+
+	"github.com/lzhig/rapidgo/net"
 )
 
-type demoCallback struct {
-}
-
-func (callback demoCallback) Disconnected(conn *net.Connection, err error) {
-	fmt.Println(conn.RemoteAddr().String(), "disconnected error: ", err)
-}
-
-func (callback demoCallback) Connected(conn *net.Connection) {
-	//fmt.Println(conn.RemoteAddr().String(), "connected")
-}
-
-func (callback demoCallback) Received(conn *net.Connection, packet net.Packet) {
-	//fmt.Println(conn.RemoteAddr().String(), "data received")
-	//go conn.SendPacket(packet)
-}
-
 func main() {
-	var ip = flag.String("address", "127.0.0.1:8888", "help message for flagname")
-	var num = flag.Int("num", 1000, "connections")
-	var size = flag.Int("size", 0xFFFF, "connections")
+	var ip = flag.String("address", "192.168.2.50:8888", "help message for flagname")
+	var num = flag.Int("num", 1, "connections")
 	flag.Parse()
-
 	runtime.GOMAXPROCS(4)
-
-	if *size > 0xFFFF {
-		*size = 0xFFFF
-	}
-	fmt.Println("address:", *ip)
-	fmt.Println("num:", *num)
-	fmt.Println("size:", *size)
-
 	for i := 0; i < *num; i++ {
 		go func() {
 			client := net.CreateTCPClient()
-			var demo demoCallback
-			//fmt.Println("connecting - ", *ip)
-			err := client.Connect(*ip, 100000, demo)
+			fmt.Println("connecting - ", *ip)
+			conn, eventChan, err := client.Connect(*ip, 5000000)
 			if err != nil {
 				fmt.Println("connect error:", err)
 				return
 			}
 
-			p := net.DefaultCreatePacketFunc()
-			p.Create(uint(*size))
+			p := make([]byte, 65535, 65535)
 
-			go func() {
-				for {
-					select {
-					case <-time.Tick(time.Second * 5):
-						if err := client.SendPacket(p); err != nil {
-							fmt.Println(err)
-							os.Exit(1)
-						}
-					}
-				}
-			}()
+			if err := conn.Send(p); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+			fmt.Println("send ok")
 
 			for {
-				client.Update()
+				select {
+				case event := <-eventChan:
+					switch event.Type {
+					case net.EventConnected:
+						fmt.Println(event.Conn.RemoteAddr().String(), "connected")
+					case net.EventDisconnected:
+						fmt.Println(event.Conn.RemoteAddr().String(), "disconnected.", event.Err)
+						return
+					}
+
+				case data := <-conn.DataChan:
+					conn.Send(data)
+				}
 			}
 		}()
-		time.Sleep(time.Microsecond * 200)
 	}
-
 	select {}
 }

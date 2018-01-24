@@ -1,7 +1,6 @@
 package net
 
 import (
-	"errors"
 	"net"
 	"time"
 )
@@ -10,20 +9,13 @@ import (
 type TCPClient struct {
 	conn Connection // 与服务端的连接
 
-	callback ICallback // 回调接口
-
 	readBuffer []byte // 读取数据缓存
 
-	packetsChan chan *packetChan // 从连接loop的协程传递上主线程
+	eventChan chan *Event
 }
 
 // Connect function
-func (c *TCPClient) Connect(serverAddress string, timeout uint32, callback ICallback) (err error) {
-	if callback == nil {
-		return errors.New("Must be set callback")
-	}
-
-	c.callback = callback
+func (c *TCPClient) Connect(serverAddress string, timeout uint32) (*Connection, <-chan *Event, error) {
 	c.conn.remoteAddress = serverAddress
 
 	dailer := net.Dialer{
@@ -31,43 +23,23 @@ func (c *TCPClient) Connect(serverAddress string, timeout uint32, callback ICall
 		Deadline:  time.Time{},
 		KeepAlive: time.Second * time.Duration(30),
 	}
+	var err error
 	c.conn.conn, err = dailer.Dial("tcp", serverAddress)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	c.callback.Connected(&c.conn)
+	c.eventChan = make(chan *Event, 2)
+	c.conn.DataChan = make(chan []byte, 16)
+	c.eventChan <- &Event{Type: EventConnected, Conn: &c.conn}
 
-	c.packetsChan = make(chan *packetChan, 1024)
+	c.conn.packetHandler = config.PacketHandlerFactory(c.conn.conn)
 
-	go c.conn.loop(callback, c.packetsChan)
+	go c.conn.loop(c.eventChan)
 
-	return nil
+	return &c.conn, c.eventChan, nil
 }
 
 // Disconnect function
 func (c *TCPClient) Disconnect() {
 	c.conn.disconnect()
-}
-
-// Update function
-func (c *TCPClient) Update() {
-	for p := range c.packetsChan {
-		c.callback.Received(p.conn, p.packet)
-	}
-}
-
-// Send function
-func (c *TCPClient) Send(data []byte) error {
-	size, err := c.conn.conn.Write(data)
-	if err != nil {
-		return err
-	}
-	if size != len(data) {
-		return errors.New("Failed to send data")
-	}
-	return nil
-}
-
-func (c *TCPClient) SendPacket(p Packet) error {
-	return c.conn.SendPacket(p)
 }
