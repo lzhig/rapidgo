@@ -19,9 +19,20 @@ type Connection struct {
 
 	packetHandler PacketHandler // 包处理器
 
-	DataChan chan []byte
+	receiveDataChan chan []byte
+	sendDataChan    chan []byte
 
 	stopCmdChan chan struct{} // 断开时发送此命令
+}
+
+func (c *Connection) init() {
+	c.receiveDataChan = make(chan []byte, 16)
+	c.sendDataChan = make(chan []byte, 16)
+}
+
+// ReceiveDataChan 返回连接接收到的数据chan
+func (c *Connection) ReceiveDataChan() <-chan []byte {
+	return c.receiveDataChan
 }
 
 // RemoteAddr function
@@ -36,32 +47,49 @@ func (c *Connection) disconnect() {
 func (c *Connection) loop(eventChan chan *Event) {
 	defer c.conn.Close()
 
+	go c.sendLoop(eventChan)
+
 	for {
 		select {
 
 		case <-c.stopCmdChan:
 			eventChan <- &Event{Type: EventDisconnected, Err: errors.New("stopped"), Conn: c}
-			close(c.DataChan)
+			close(c.receiveDataChan)
 			return
 
 		default:
 			data, err := c.packetHandler.Receive()
 			if err != nil {
 				eventChan <- &Event{Type: EventDisconnected, Err: err, Conn: c}
-				close(c.DataChan)
+				close(c.receiveDataChan)
 				return
 			}
 
 			if data != nil {
-				c.DataChan <- data
+				c.receiveDataChan <- data
+			}
+		}
+	}
+}
+
+func (c *Connection) sendLoop(eventChan chan *Event) {
+	for {
+		select {
+		case <-c.stopCmdChan:
+			close(c.sendDataChan)
+			return
+
+		case data := <-c.sendDataChan:
+			if err := c.packetHandler.Send(data); err != nil {
+				eventChan <- &Event{Type: EventSendFailed, Err: err, Conn: c}
 			}
 		}
 	}
 }
 
 // Send send data
-func (c *Connection) Send(data []byte) error {
-	return c.packetHandler.Send(data)
+func (c *Connection) Send(data []byte) {
+	c.sendDataChan <- data
 }
 
 // 管理建立的连接

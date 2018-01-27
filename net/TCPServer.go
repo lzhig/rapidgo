@@ -66,7 +66,9 @@ func (s *TCPServer) loop(netListener *net.TCPListener) {
 				return
 			}
 
-			newConn := &Connection{conn: conn, DataChan: make(chan []byte, 16)}
+			newConn := &Connection{conn: conn}
+			newConn.init()
+
 			s.conns.add(newConn)
 			newConn.packetHandler = config.PacketHandlerFactory(conn)
 			s.eventChan <- &Event{Type: EventConnected, Conn: newConn}

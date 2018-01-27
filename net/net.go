@@ -41,6 +41,9 @@ const (
 
 	// EventDisconnected 断开
 	EventDisconnected
+
+	// EventSendFailed 发送错误
+	EventSendFailed
 )
 
 // Event 事件
