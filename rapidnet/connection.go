@@ -2,6 +2,7 @@ package rapidnet
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 )
@@ -22,12 +23,19 @@ type Connection struct {
 	receiveDataChan chan []byte
 	sendDataChan    chan []byte
 
-	stopCmdChan chan struct{} // 断开时发送此命令
+	stopCmdChan      chan struct{} // 断开时发送此命令
+	stopSendLoopChan chan struct{}
+
+	release func()
+
+	releaseOnce sync.Once
 }
 
 func (c *Connection) init() {
 	c.receiveDataChan = make(chan []byte, 16)
 	c.sendDataChan = make(chan []byte, 16)
+	c.stopCmdChan = make(chan struct{})
+	c.stopSendLoopChan = make(chan struct{})
 }
 
 // ReceiveDataChan 返回连接接收到的数据chan
@@ -40,28 +48,34 @@ func (c *Connection) RemoteAddr() net.Addr {
 	return c.conn.RemoteAddr()
 }
 
-func (c *Connection) disconnect() {
-	c.stopCmdChan <- struct{}{}
+func (c *Connection) Disconnect() {
+	fmt.Println("call Connonection Disconnect()")
+	c.releaseOnce.Do(c._disconnect)
+}
+
+func (c *Connection) _disconnect() {
+	c.conn.Close()
+	close(c.stopCmdChan)
 }
 
 func (c *Connection) loop(eventChan chan *Event) {
 	defer c.conn.Close()
 
 	go c.sendLoop(eventChan)
+	defer close(c.receiveDataChan)
+	defer close(c.stopSendLoopChan)
+	defer c.release()
 
 	for {
 		select {
-
 		case <-c.stopCmdChan:
 			eventChan <- &Event{Type: EventDisconnected, Err: errors.New("stopped"), Conn: c}
-			close(c.receiveDataChan)
 			return
 
 		default:
 			data, err := c.packetHandler.Receive()
 			if err != nil {
 				eventChan <- &Event{Type: EventDisconnected, Err: err, Conn: c}
-				close(c.receiveDataChan)
 				return
 			}
 
@@ -75,13 +89,13 @@ func (c *Connection) loop(eventChan chan *Event) {
 func (c *Connection) sendLoop(eventChan chan *Event) {
 	for {
 		select {
-		case <-c.stopCmdChan:
-			close(c.sendDataChan)
+		case <-c.stopSendLoopChan:
 			return
 
 		case data := <-c.sendDataChan:
 			if err := c.packetHandler.Send(data); err != nil {
 				eventChan <- &Event{Type: EventSendFailed, Err: err, Conn: c}
+				return
 			}
 		}
 	}
@@ -89,7 +103,11 @@ func (c *Connection) sendLoop(eventChan chan *Event) {
 
 // Send send data
 func (c *Connection) Send(data []byte) {
-	c.sendDataChan <- data
+	select {
+	case c.sendDataChan <- data:
+	default:
+		panic(errors.New("[rapidnet] connection Send: sendDataChan is full"))
+	}
 }
 
 // 管理建立的连接

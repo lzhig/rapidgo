@@ -47,7 +47,8 @@ func (obj *defaultPacketHandler) Receive() ([]byte, error) {
 			obj.bufReader.Discard(defaultHeaderSize)
 			obj.headerReady = true
 
-			obj.dataLen = int(p[2]) + int(p[3]<<8)
+			//fmt.Println(p)
+			obj.dataLen = int(p[2]) + (int(p[3]) << 8)
 			obj.data = make([]byte, obj.dataLen)
 		} else {
 			nerr, ok := err.(net.Error)

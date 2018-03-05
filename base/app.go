@@ -8,6 +8,8 @@
 
 package base
 
+import "context"
+
 // App type
 type App struct {
 	goroutineManager GoroutineManager
@@ -35,5 +37,20 @@ func (obj *App) Start() {
 // Exit function
 func (obj *App) Exit() {
 	obj.goroutineManager.Exit()
-	close(obj.exitChan)
+	obj.exitChan <- struct{}{}
+}
+
+// CreateCancelContext 创建CancelContext, 方便goroutine管理
+func (obj *App) CreateCancelContext() (context.Context, context.CancelFunc) {
+	return obj.goroutineManager.CreateCancelContext()
+}
+
+// GoRoutine function
+func (obj *App) GoRoutine(ctx context.Context, f func(context.Context)) {
+	obj.goroutineManager.GoRoutine(ctx, f)
+}
+
+// GoRoutine function
+func (obj *App) GoRoutineArgs(ctx context.Context, f func(context.Context, ...interface{}), args ...interface{}) {
+	obj.goroutineManager.GoRoutineArgs(ctx, f, args...)
 }

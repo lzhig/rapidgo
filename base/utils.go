@@ -20,3 +20,23 @@ func BytesToInt(b []byte) int {
 	binary.Read(bytesBuffer, binary.BigEndian, &tmp)
 	return int(tmp)
 }
+
+// Limitation type
+type Limitation struct {
+	sem chan struct{}
+}
+
+// Init function
+func (obj *Limitation) Init(n int) {
+	obj.sem = make(chan struct{}, n)
+}
+
+// Acquire function
+func (obj *Limitation) Acquire() {
+	obj.sem <- struct{}{}
+}
+
+// Relase function
+func (obj *Limitation) Release() {
+	<-obj.sem
+}

@@ -66,7 +66,7 @@ func (s *TCPServer) loop(netListener *net.TCPListener) {
 				return
 			}
 
-			newConn := &Connection{conn: conn}
+			newConn := &Connection{conn: conn, release: s.conns.release}
 			newConn.init()
 
 			s.conns.add(newConn)

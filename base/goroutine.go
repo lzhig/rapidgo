@@ -53,10 +53,18 @@ func (obj *GoroutineManager) CreateCancelContext() (context.Context, context.Can
 // 			}
 // 		}
 // 	}, 1)
-func (obj *GoroutineManager) GoRoutine(ctx context.Context, f func(context.Context, ...interface{}), args ...interface{}) {
+func (obj *GoroutineManager) GoRoutine(ctx context.Context, f func(context.Context)) {
 	obj.wg.Add(1)
 	go func() {
 		defer obj.wg.Done()
-		f(ctx, args)
+		f(ctx)
+	}()
+}
+
+func (obj *GoroutineManager) GoRoutineArgs(ctx context.Context, f func(context.Context, ...interface{}), args ...interface{}) {
+	obj.wg.Add(1)
+	go func() {
+		defer obj.wg.Done()
+		f(ctx, args...)
 	}()
 }

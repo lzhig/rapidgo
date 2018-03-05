@@ -105,20 +105,20 @@ func (obj *packetHandler) Send(data []byte) error {
 }
 
 func main() {
-	var ip = flag.String("address", "192.168.2.50:8888", "help message for flagname")
+	var ip = flag.String("address", "192.168.2.50:8010", "help message for flagname")
 	var num = flag.Int("num", 1, "connections")
 	flag.Parse()
 	runtime.GOMAXPROCS(4)
 
-	config := &rapidnet.Config{PacketHandlerFactory: func(c net.Conn) rapidnet.PacketHandler {
-		return &packetHandler{
-			conn:      c,
-			bufReader: bufio.NewReader(c),
-			bufWriter: bufio.NewWriter(c),
-		}
-	},
-	}
-	rapidnet.Init(config)
+	// config := &rapidnet.Config{PacketHandlerFactory: func(c net.Conn) rapidnet.PacketHandler {
+	// 	return &packetHandler{
+	// 		conn:      c,
+	// 		bufReader: bufio.NewReader(c),
+	// 		bufWriter: bufio.NewWriter(c),
+	// 	}
+	// },
+	// }
+	// rapidnet.Init(config)
 
 	for i := 0; i < *num; i++ {
 		go func() {
@@ -141,6 +141,7 @@ func main() {
 					switch event.Type {
 					case rapidnet.EventConnected:
 						fmt.Println(event.Conn.RemoteAddr().String(), "connected")
+						go handleConnection(event.Conn)
 					case rapidnet.EventDisconnected:
 						fmt.Println(event.Conn.RemoteAddr().String(), "disconnected.", event.Err)
 						return
@@ -153,4 +154,17 @@ func main() {
 		}()
 	}
 	select {}
+}
+
+func handleConnection(conn *rapidnet.Connection) {
+	for {
+		select {
+		case data := <-conn.ReceiveDataChan():
+			if data == nil {
+				return
+			}
+			fmt.Println("Recieve data. size:", len(data))
+			conn.Send(data)
+		}
+	}
 }

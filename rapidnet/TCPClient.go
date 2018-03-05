@@ -29,7 +29,7 @@ func (c *TCPClient) Connect(serverAddress string, timeout uint32) (*Connection, 
 	}
 	c.eventChan = make(chan *Event, 2)
 
-	c.conn = &Connection{conn: conn}
+	c.conn = &Connection{conn: conn, release: func() {}}
 	c.conn.remoteAddress = serverAddress
 	c.conn.init()
 	c.eventChan <- &Event{Type: EventConnected, Conn: c.conn}
@@ -43,5 +43,5 @@ func (c *TCPClient) Connect(serverAddress string, timeout uint32) (*Connection, 
 
 // Disconnect function
 func (c *TCPClient) Disconnect() {
-	c.conn.disconnect()
+	c.conn.Disconnect()
 }
