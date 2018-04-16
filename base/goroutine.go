@@ -13,6 +13,7 @@ import (
 	"sync"
 )
 
+// GoroutineManager type
 type GoroutineManager struct {
 	ctx        context.Context
 	cancelFunc context.CancelFunc
@@ -26,10 +27,12 @@ func (obj *GoroutineManager) Init() error {
 	return nil
 }
 
+// Wait function
 func (obj *GoroutineManager) Wait() {
 	obj.wg.Wait()
 }
 
+// Exit function
 func (obj *GoroutineManager) Exit() {
 	obj.cancelFunc()
 }
@@ -56,14 +59,17 @@ func (obj *GoroutineManager) CreateCancelContext() (context.Context, context.Can
 func (obj *GoroutineManager) GoRoutine(ctx context.Context, f func(context.Context)) {
 	obj.wg.Add(1)
 	go func() {
+		defer LogPanic()
 		defer obj.wg.Done()
 		f(ctx)
 	}()
 }
 
+// GoRoutineArgs function
 func (obj *GoroutineManager) GoRoutineArgs(ctx context.Context, f func(context.Context, ...interface{}), args ...interface{}) {
 	obj.wg.Add(1)
 	go func() {
+		defer LogPanic()
 		defer obj.wg.Done()
 		f(ctx, args...)
 	}()
