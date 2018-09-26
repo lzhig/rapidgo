@@ -36,6 +36,7 @@ func (obj *defaultPacketHandler) Receive() ([]byte, error) {
 		// 读取header
 		obj.conn.SetReadDeadline(time.Now().Add(time.Second * 2))
 		p, err := obj.bufReader.Peek(defaultHeaderSize)
+		//fmt.Println(err)
 		if err == io.EOF {
 			return nil, err
 		}
@@ -52,12 +53,17 @@ func (obj *defaultPacketHandler) Receive() ([]byte, error) {
 			obj.data = make([]byte, obj.dataLen)
 		} else {
 			nerr, ok := err.(net.Error)
+			//fmt.Println(nerr, ok)
 			if ok {
 				if nerr.Timeout() {
 					return nil, nil
 				} else if nerr.Temporary() {
 					return nil, nerr
+				} else {
+					return nil, err
 				}
+			} else {
+				return nil, err
 			}
 		}
 	}

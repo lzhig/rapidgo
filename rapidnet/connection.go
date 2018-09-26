@@ -2,9 +2,10 @@ package rapidnet
 
 import (
 	"errors"
-	"fmt"
 	"net"
 	"sync"
+
+	"github.com/lzhig/rapidgo/base"
 )
 
 // 用于向上层传递收到的数据包
@@ -49,7 +50,6 @@ func (c *Connection) RemoteAddr() net.Addr {
 }
 
 func (c *Connection) Disconnect() {
-	fmt.Println("call Connonection Disconnect()")
 	c.releaseOnce.Do(c._disconnect)
 }
 
@@ -75,6 +75,7 @@ func (c *Connection) loop(eventChan chan *Event) {
 		default:
 			data, err := c.packetHandler.Receive()
 			if err != nil {
+				//base.LogError("Receive() return error:", err)
 				eventChan <- &Event{Type: EventDisconnected, Err: err, Conn: c}
 				return
 			}
@@ -106,7 +107,8 @@ func (c *Connection) Send(data []byte) {
 	select {
 	case c.sendDataChan <- data:
 	default:
-		panic(errors.New("[rapidnet] connection Send: sendDataChan is full"))
+		//panic(errors.New("[rapidnet] connection Send: sendDataChan is full"))
+		base.LogError("connection Send: sendDataChan is full")
 	}
 }
 
